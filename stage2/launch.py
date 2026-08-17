@@ -2,8 +2,9 @@ import argparse
 import contextlib
 import logging
 import os
+os.environ['HF_HOME'] = 'D:/New folder/.cache_hf'
 import sys
-import wandb
+wandb = None
 
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -177,8 +178,8 @@ def main(args, extras) -> None:
         )()
 
     trainer = Trainer(
-        callbacks=callbacks,
-        logger=loggers,
+        callbacks=[c for c in callbacks if 'LearningRateMonitor' not in str(type(c))],
+        logger=False,
         inference_mode=False,
         accelerator="gpu",
         devices=devices,

@@ -592,132 +592,59 @@ class GaussianEditor_Video_Copy(BaseLift3DSystem):
                 )[None]
                     
     @torch.no_grad()
-    def utils_1111(self,category='up'):
-        if category=='up' or category=='reinpaint':
-                if self.cfg.enable_ControlNet:
-                    controlnet_path = "shgao/edit-anything-v0-3"
-                    # controlnet_path = "/root/autodl-tmp/cache/hub/models--shgao--edit-anything-v0-3/snapshots/14a35cb4e0dd574a6e895b7f73c827acadc0970f"
-                    controlnet = ControlNetModel.from_pretrained(controlnet_path, torch_dtype=torch.float32) 
-                    pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
-                        "stabilityai/stable-diffusion-2-inpainting", controlnet=controlnet, torch_dtype=torch.float32
-                        ,vae=AutoencoderKL.from_pretrained('stabilityai/sd-vae-ft-mse')
-                    )            
-                else:
-                    pipe = StableDiffusionInpaintPipeline.from_pretrained(
-                        "stabilityai/stable-diffusion-2-inpainting",
-                        torch_dtype=torch.float32,
-                        revision=None,
-                        vae=AutoencoderKL.from_pretrained('stabilityai/sd-vae-ft-mse'),
-                        safety_checker=None,
-                    )
+    def utils_1111(self, category='up'):
+        import os, torch
+        if torch.cuda.is_available():
+            torch.set_float32_matmul_precision('high')
+            torch.backends.cudnn.benchmark = True
+            torch.cuda.empty_cache()
+        from fashn_vton import TryOnPipeline
+        weights_dir = getattr(self.cfg, 'fashn_weights_dir', '/content/fashn_weights')
+        if not os.path.exists(weights_dir):
+            weights_dir = os.path.abspath('backend/models')
+        print(f'⚡ [FASHN_VTON] Loading Accelerated Virtual Try-On Pipeline from: {weights_dir}')
+        pipeline = TryOnPipeline(weights_dir=weights_dir)
+        return pipeline
+    def render_Inapint(self, images, mask_images, pipe, ctrl_scale=0.60):
+        import torch, numpy as np
+        from PIL import Image
+        
+        def to_pil(x):
+            if isinstance(x, Image.Image): return x
+            if isinstance(x, torch.Tensor): x = x.detach().cpu().numpy()
+            if isinstance(x, np.ndarray):
+                arr = x.squeeze()
+                if np.issubdtype(arr.dtype, np.floating): arr = (np.clip(arr, 0, 1) * 255.0).astype(np.uint8)
+                elif arr.dtype != np.uint8: arr = np.clip(arr, 0, 255).astype(np.uint8)
+                if arr.ndim == 3 and arr.shape[0] in [1, 3, 4] and arr.shape[0] < arr.shape[1]: arr = arr.transpose(1, 2, 0)
+                return Image.fromarray(arr)
+            return x
 
-                pipe.unet = UNet2DConditionModel.from_pretrained(
-                    self.cfg.inpaint_model_path, subfolder="unet", revision=None,
-                )
-                pipe.text_encoder = CLIPTextModel.from_pretrained(
-                    self.cfg.inpaint_model_path, subfolder="text_encoder", revision=None,
-                )
-                pipe.scheduler = DDPMScheduler.from_config(pipe.scheduler.config)
-                pipe = pipe.to("cuda")
+        cloth_path = getattr(self.cfg, 'control_image_path', None)
+        if cloth_path and os.path.exists(cloth_path):
+            garment_img = Image.open(cloth_path).convert('RGB')
+        else:
+            garment_img = self.inpaint_img_controlnet if hasattr(self, 'inpaint_img_controlnet') else Image.new('RGB', (576, 768), (255, 0, 0))
+            if not isinstance(garment_img, Image.Image): garment_img = to_pil(garment_img)
+
+        results = []
+        for idx, img_raw in enumerate(images):
+            img_pil = to_pil(img_raw)
+            orig_size = img_pil.size
+            p_small = img_pil.resize((576, 768), Image.Resampling.LANCZOS)
+            g_small = garment_img.resize((576, 768), Image.Resampling.LANCZOS)
+            
+            with torch.inference_mode():
+                res = pipe(
+                    person_image=p_small,
+                    garment_image=g_small,
+                    category='one-pieces',
+                    num_timesteps=20
+                ).images[0]
                 
-                
-                if self.cfg.enable_attention:
-                    if category=='reinpaint':
-                        self.attn_prcs=XFormersAttnProcessor_Reference_BetterImpl_Multi_MoreThanTwo(ref_num=self.num_refFrame,enable_limit=self.cfg.enable_limit)
-                        pipe.unet.set_attn_processor(processor=self.attn_prcs)    
-                    elif category=='up':
-                        
-                        self.attn_prcs=XFormersAttnProcessor_Reference_BetterImpl_Multi_MoreThanTwo(ref_num=self.num_refFrame,enable_limit=self.cfg.enable_limit)
-                        
-                        pipe.unet.set_attn_processor(processor=self.attn_prcs)    
-                    else:
-                        pipe.enable_xformers_memory_efficient_attention()
-                else:
-                    pipe.enable_xformers_memory_efficient_attention()
-                return pipe
-            
-            
-        elif category=='down':
-            exit(1)
-            # pipe_2 = StableDiffusionInpaintPipeline.from_pretrained(
-            #     "stabilityai/stable-diffusion-2-inpainting",
-            #     torch_dtype=torch.float32,
-            #     revision=None,
-            #     vae=AutoencoderKL.from_pretrained('stabilityai/sd-vae-ft-mse'),
-            # )
-
-            # pipe_2.unet = UNet2DConditionModel.from_pretrained(
-            #     '/root/autodl-tmp/Lora/realfill/trouser-model', subfolder="unet", revision=None,
-            # )
-            
-            # pipe_2.text_encoder = CLIPTextModel.from_pretrained(
-            #     '/root/autodl-tmp/Lora/realfill/trouser-model', subfolder="text_encoder", revision=None,
-            # )
-            # pipe_2.scheduler = DDPMScheduler.from_config(pipe_2.scheduler.config)
-            # pipe_2 = pipe_2.to("cuda")   
-            
-            
-            # pipe_2.unet.set_attn_processor(processor=XFormersAttnProcessor_Reference_BetterImpl_Multi_MoreThanTwo(ref_num=self.num_refFrame))    
-            # return pipe_2
-
-
-            
-    @torch.no_grad()     
-    def render_Inapint(self, images, mask_images, pipe,ctrl_scale):
-        torch.cuda.empty_cache()
-        w=8*round(self.global_width/8)
-        h=8*round(self.global_height/8)                    
-        generator = torch.Generator(device="cuda").manual_seed(0)
-        if self.rndndn==None:
-            self.rndndn=randn_tensor((1, pipe.vae.config.latent_channels, h // pipe.vae_scale_factor , w // pipe.vae_scale_factor), generator=generator, device=pipe._execution_device).repeat(len(images),1,1,1)
-            
-
-        if len(images)<self.rndndn.shape[0]:
-            self.rndndn=self.rndndn[:len(images),:,:,:]
-        
-        
-     
-        
-        if self.cfg.enable_ControlNet:
-            results = pipe(
-                [self.cfg.inpaint_prompt] * len(images),
-                image=images,
-                mask_image=mask_images,
-                num_inference_steps=25, guidance_scale=1.0,
-                negative_prompt=['monochrome, lowres, bad anatomy, worst quality, low quality'],
-                height=h,
-                width=w,           
-                generator=generator,
-                control_image=self.inpaint_img_controlnet,
-                controlnet_conditioning_scale=ctrl_scale,
-                latents = self.rndndn,
-            ).images
-        else:            
-            results = pipe(
-                [self.cfg.inpaint_prompt] * len(images),
-                image=images,
-                mask_image=mask_images,
-                num_inference_steps=25, guidance_scale=1.0,
-                negative_prompt=['monochrome, lowres, bad anatomy, worst quality, low quality'],
-                height=h,
-                width=w,    
-                generator=generator,
-                latents = self.rndndn,
-            ).images            
-
-        composite_results = []
-
-        
-        try:
-            for result, image ,mask_image in zip(results, images,mask_images):
-                composite_results.append(Image.composite(result.resize(image.size,Image.Resampling.LANCZOS), image, mask_image))
-        except:
-            composite_results.append(Image.composite(results[0].resize(len(images)), images, mask_images))
-            
-        return composite_results
-    
-    
-    @torch.no_grad()         
+            res_full = res.resize(orig_size, Image.Resampling.LANCZOS)
+            results.append(res_full)
+        return results
     def render_all_view_Inpaint(self, category='up',cache_name="Inpaint_Render_hoodie_Batch",flag=False):
         torch.cuda.empty_cache()
         self.pipe_Inpaint=None

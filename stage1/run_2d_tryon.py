@@ -1,4 +1,6 @@
 import argparse
+import os
+os.environ['HF_HOME'] = 'D:/New folder/.cache_hf'
 import random
 import shutil
 import sys

@@ -421,7 +421,7 @@ class SaverMixin:
             imageio.mimsave(save_path, imgs, fps=fps, palettesize=256)
         elif save_format == "mp4":
             imgs = [cv2.cvtColor(i, cv2.COLOR_BGR2RGB) for i in imgs]
-            imageio.mimsave(save_path, imgs, fps=fps)
+            imageio.mimsave(save_path, imgs, fps=fps, codec='libx264')
         if name and self._wandb_logger:
             wandb.log(
                 {

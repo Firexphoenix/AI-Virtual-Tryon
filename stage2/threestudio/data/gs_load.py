@@ -260,7 +260,7 @@ class GSLoadIterableDataset(IterableDataset, Updateable):
                 self.view_index_stack = self.n2n_view_index.copy()
             view_index = random.choice(self.view_index_stack)
             self.view_index_stack.remove(view_index)
-            cam_list.append(self.scene.cameras[view_index])
+            cam_list.append(self.scene.cameras[view_index % len(self.scene.cameras)])
             index_list.append(view_index)
 
         return {
@@ -304,8 +304,8 @@ class GSLoadDataset(Dataset):
             self.w = self.cfg.width
         else:
             self.n_views = self.total_view_num
-            self.h = self.cfg.eval_height if self.cfg.eval_height > 0 else self.scene.cameras[0].image_height
-            self.w = self.cfg.eval_width if self.cfg.eval_width > 0 else self.scene.cameras[0].image_width
+            self.h = self.cfg.eval_height if self.cfg.eval_height > 0 else self.scene.cameras[0 % len(self.scene.cameras)].image_height
+            self.w = self.cfg.eval_width if self.cfg.eval_width > 0 else self.scene.cameras[0 % len(self.scene.cameras)].image_width
 
         if train_view_list is None:
             self.selected_views = torch.linspace(

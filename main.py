@@ -5,12 +5,10 @@ import time
 import torch
 import traceback
 import glob
-from pathlib import Path 
 import os
-from transformers import Blip2ForConditionalGeneration, AutoProcessor
-from diffusers.utils import load_image
 from PIL import Image
-os.environ['HF_HOME'] = '/mnt/sfs-common/ykcao/cache'
+os.environ['HF_HOME'] = 'D:/New folder/.cache_hf'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 # download_dir = './downloaded_images'
 # if not os.path.exists(download_dir):
@@ -58,50 +56,60 @@ def process_images_and_generate_captions(cloth_path):
         # print('Found replica')
 
     
-    # Initialize the model and processor
-    use_cache=False
+    # Initialize the model and processor on CPU to conserve GPU VRAM
+    use_cache = False
     output_file = "./image_descriptions.txt"
     if not use_cache:
-        processor = AutoProcessor.from_pretrained("Salesforce/blip2-opt-2.7b")
-        model_blip = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        model_blip.to(device)
-        
+        try:
+            processor = AutoProcessor.from_pretrained("Salesforce/blip2-opt-2.7b")
+            model_blip = Blip2ForConditionalGeneration.from_pretrained(
+                "Salesforce/blip2-opt-2.7b",
+                torch_dtype=torch.float16,
+            )
+            device = "cpu"
+            model_blip.to(device)
 
-        prompt = "person is dressed in"
-        
-        # Generate captions for each image
-        image = Image.open(cloth_path).convert('RGB')
-        inputs = processor(image, text=prompt, return_tensors="pt").to(device, torch.float16)
+            prompt = "person is dressed in"
+            image = Image.open(cloth_path).convert("RGB")
+            inputs = processor(image, text=prompt, return_tensors="pt").to(device)
 
-        generated_ids = model_blip.generate(**inputs, max_new_tokens=20)
-        generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            with torch.no_grad():
+                generated_ids = model_blip.generate(**inputs, max_new_tokens=20)
+            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+
+            del model_blip, processor
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+        except Exception as exc:
+            print(f"Captioning fallback: {exc}")
+            generated_text = "person is dressed in casual upper clothing"
 
     return generated_text
 
 
-def process_images(image_path, data_path, height, weight, description,enable_idm_attn):
+def process_images(image_path, data_path, height, weight, description, enable_idm_attn):
     """Process each image using new_IDM_VTON"""
-    # Change to the IDM_VTON directory and run the Python script
+    import sys
     os.chdir('./stage1/')
     subprocess.run([
-        'python3', './run_2d_tryon.py',
+        sys.executable, './run_2d_tryon.py',
         '--garm_img_path', image_path,
         '--data_path_imgs', str(os.path.join(data_path, 'images')),
         f'--height={height}', f'--width={weight}',
         f'--garm_desc_given={description}'
     ])
     
-    # Remove specific file
-    os.remove("./multi_first/grid.png")
+    # Remove specific file if exists
+    if os.path.exists("./multi_first/grid.png"):
+        os.remove("./multi_first/grid.png")
 
     
 def run_realfill_pipeline(description):
     """Run the realfill training pipeline"""
     subprocess.run([
         'accelerate', 'launch', './train_lora.py',
-        '--pretrained_model_name_or_path', 'stabilityai/stable-diffusion-2-inpainting',
+        '--pretrained_model_name_or_path', 'runwayml/stable-diffusion-inpainting',
         '--train_data_dir', './multi_first',
         '--output_dir', './models/pipeline_captureddata-model',
         '--resolution', '512', '--train_batch_size', '16', '--gradient_accumulation_steps', '1',
@@ -142,9 +150,10 @@ def edit_gaussian_model(img_path, data_path, height, weight, gs_source, descript
     model = data_path.split('/')[-1]
     timestamp = f"{task_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{model}_{os.path.splitext(base_name)[0]}"
     
+    import sys
     # Run GaussianEditor
     subprocess.run([
-        'python3', 'launch.py',
+        sys.executable, 'launch.py',
         f'timestamp={timestamp}',
         '--config', './configs/gsvton.yaml',
         '--train',
@@ -192,10 +201,16 @@ Tasks={
 previous_idm_attn = {'prev': None }
 
 def Run(args):        
-        
-        
         generated_text = process_images_and_generate_captions(args.cloth_path)
-        weight, height=Image.open(glob.glob(os.path.join(args.data_path,'images/*.png'))[0]).size
+        imgs = (
+            glob.glob(os.path.join(args.data_path, "images/*.png"))
+            + glob.glob(os.path.join(args.data_path, "images/*.jpg"))
+            + glob.glob(os.path.join(args.data_path, "images/*.jpeg"))
+        )
+        if imgs:
+            weight, height = Image.open(imgs[0]).size
+        else:
+            weight, height = 512, 512
 
         image_paths = args.cloth_path
         data_path = args.data_path

@@ -75,7 +75,7 @@ class RGBInpainter:
         lora_model_path: Optional[str] = None,
         device: str = "cuda:0",
         vae_device: str = "cuda:0",
-        pipeline_name: str = "stabilityai/stable-diffusion-2-inpainting",
+        pipeline_name: str = "runwayml/stable-diffusion-inpainting",
     ):
         print(f"Loading RGB Inpainter ...")
 
@@ -101,7 +101,7 @@ class RGBInpainter:
         # )
         
         pipe = StableDiffusionInpaintPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-2-inpainting",
+            "runwayml/stable-diffusion-inpainting",
             torch_dtype=torch.float32,
             revision=None,
             vae=AutoencoderKL.from_pretrained('stabilityai/sd-vae-ft-mse'),

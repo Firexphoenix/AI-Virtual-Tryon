@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+*.so
+
+# Build and temp directories
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Large model weights and checkpoints (handled via download scripts / HuggingFace)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.pkl
+*.bin
+
+# Datasets and outputs
+/DATA/real_person/
+/DATA/real_person_undistorted/
+/stage2/exp/
+/stage2/outputs/
+/output_3dgs/
+/saved_3dgs/
+/saved_stage1_model/
+/FINAL_AODAI_3D*/
+
+# Logs and environment
+wandb/
+.env
+venv/
+env/
+.ipynb_checkpoints/
+
+stage1/ckpt/
+stage1/models/

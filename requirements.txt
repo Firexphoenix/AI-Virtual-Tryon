@@ -70,3 +70,7 @@ Pillow==9.5.0
 # gaussian splatting
 stage2/gaussiansplatting/submodules/diff-gaussian-rasterization
 stage2/gaussiansplatting/submodules/simple-knn
+git+https://github.com/fashn-AI/fashn-vton-1.5.git
+imageio-ffmpeg
+rembg
+trimesh

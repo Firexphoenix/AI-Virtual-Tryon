@@ -44,6 +44,8 @@ class PerceptualLoss(nn.Module):
         return model
 
     def forward(self, input, target):
+        if hasattr(input, 'shape') and hasattr(target, 'shape') and input.shape[-2:] != target.shape[-2:]:
+            target = torch.nn.functional.interpolate(target, size=input.shape[-2:], mode='bilinear', align_corners=False)
         in0_input, in1_input = (self.scaling_layer(input), self.scaling_layer(target))
         outs0, outs1 = self.net(in0_input), self.net(in1_input)
         feats0, feats1, diffs = {}, {}, {}

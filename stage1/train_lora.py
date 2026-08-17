@@ -5,6 +5,7 @@ import itertools
 import logging
 import math
 import os
+os.environ['HF_HOME'] = 'D:/New folder/.cache_hf'
 import shutil
 from pathlib import Path
 

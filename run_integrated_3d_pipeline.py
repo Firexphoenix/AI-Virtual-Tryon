@@ -72,17 +72,17 @@ def run_step1_colmap(video_path: str, work_dir: str):
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen"
 
-    print("📐 Chạy COLMAP Feature Extractor...")
+    print("📐 Chạy COLMAP Feature Extractor (Headless Safe)...")
     subprocess.run(
-        f'colmap feature_extractor --database_path "{database_path}" --image_path "{input_frames_dir}" --ImageReader.camera_model PINHOLE --ImageReader.single_camera 1',
+        f'colmap feature_extractor --database_path "{database_path}" --image_path "{input_frames_dir}" --ImageReader.camera_model PINHOLE --ImageReader.single_camera 1 --SiftExtraction.use_gpu 0',
         shell=True,
         check=True,
         env=env
     )
 
-    print("🔗 Chạy COLMAP Exhaustive Matcher...")
+    print("🔗 Chạy COLMAP Exhaustive Matcher (Headless Safe)...")
     subprocess.run(
-        f'colmap exhaustive_matcher --database_path "{database_path}"',
+        f'colmap exhaustive_matcher --database_path "{database_path}" --SiftMatching.use_gpu 0',
         shell=True,
         check=True,
         env=env

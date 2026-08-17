@@ -13,6 +13,11 @@ import subprocess
 import sys
 from pathlib import Path
 from PIL import Image
+
+# Headless display configuration for Colab/Linux
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
 from tqdm import tqdm
 
@@ -64,17 +69,40 @@ def run_step1_colmap(video_path: str, work_dir: str):
     print(f"🎬 Trích xuất 48 khung ảnh từ: {video_path}")
     subprocess.run(f'ffmpeg -y -i "{video_path}" -vf "fps=4" -q:v 2 "{input_frames_dir}/frame_%04d.jpg"', shell=True, check=True)
 
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+
     print("📐 Chạy COLMAP Feature Extractor...")
-    subprocess.run(f'colmap feature_extractor --database_path "{database_path}" --image_path "{input_frames_dir}" --ImageReader.camera_model PINHOLE --ImageReader.single_camera 1', shell=True, check=True)
+    subprocess.run(
+        f'colmap feature_extractor --database_path "{database_path}" --image_path "{input_frames_dir}" --ImageReader.camera_model PINHOLE --ImageReader.single_camera 1',
+        shell=True,
+        check=True,
+        env=env
+    )
 
     print("🔗 Chạy COLMAP Exhaustive Matcher...")
-    subprocess.run(f'colmap exhaustive_matcher --database_path "{database_path}"', shell=True, check=True)
+    subprocess.run(
+        f'colmap exhaustive_matcher --database_path "{database_path}"',
+        shell=True,
+        check=True,
+        env=env
+    )
 
     print("🗺️ Chạy COLMAP Mapper...")
-    subprocess.run(f'colmap mapper --database_path "{database_path}" --image_path "{input_frames_dir}" --output_path "{distorted_sparse_dir}"', shell=True, check=True)
+    subprocess.run(
+        f'colmap mapper --database_path "{database_path}" --image_path "{input_frames_dir}" --output_path "{distorted_sparse_dir}"',
+        shell=True,
+        check=True,
+        env=env
+    )
 
     print("🔍 Chạy COLMAP Image Undistorter...")
-    subprocess.run(f'colmap image_undistorter --image_path "{input_frames_dir}" --input_path "{distorted_sparse_dir}/0" --output_path "{work_dir}" --output_type COLMAP', shell=True, check=True)
+    subprocess.run(
+        f'colmap image_undistorter --image_path "{input_frames_dir}" --input_path "{distorted_sparse_dir}/0" --output_path "{work_dir}" --output_type COLMAP',
+        shell=True,
+        check=True,
+        env=env
+    )
 
     print("✅ BƯỚC 1 HOÀN TẤT: Đã dựng thành công ma trận 48 camera.")
 

@@ -2,6 +2,7 @@
 """
 ================================================================================
 INTEGRATED 3D VIRTUAL FASHION TRY-ON PIPELINE (Fashn-VTON + 3D Gaussian Splatting)
+Compatible with: Google Colab, Kaggle Notebooks, and Local Linux/Windows GPU.
 ================================================================================
 """
 
@@ -14,7 +15,7 @@ import sys
 from pathlib import Path
 from PIL import Image
 
-# Headless display configuration for Colab/Linux
+# Headless display configuration for Colab/Kaggle/Linux
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -23,27 +24,36 @@ from tqdm import tqdm
 
 
 def parse_args():
+    default_root = "/kaggle/working" if os.path.exists("/kaggle") else "."
+    default_weights = "/kaggle/working/fashn_weights" if os.path.exists("/kaggle") else "/content/fashn_weights"
+    if not os.path.exists("/content") and not os.path.exists("/kaggle"):
+        default_weights = "./fashn_weights"
+
     parser = argparse.ArgumentParser(description="Integrated 3D Virtual Fashion Try-On Pipeline")
     parser.add_argument("--video", type=str, required=False, help="Path to input person video (e.g. aodai_model.mp4)")
     parser.add_argument("--cloth", type=str, required=False, help="Path to input garment image (e.g. aodai_cloth.jpg)")
-    parser.add_argument("--weights_dir", type=str, default="/content/fashn_weights", help="Path to Fashn-VTON weights directory")
-    parser.add_argument("--work_dir", type=str, default="./DATA/real_person", help="Working directory for COLMAP and dataset")
-    parser.add_argument("--output_dir", type=str, default="./output_3dgs", help="Output directory for 3DGS model and renders")
+    parser.add_argument("--weights_dir", type=str, default=default_weights, help="Path to Fashn-VTON weights directory")
+    parser.add_argument("--work_dir", type=str, default=f"{default_root}/DATA/real_person", help="Working directory for COLMAP and dataset")
+    parser.add_argument("--output_dir", type=str, default=f"{default_root}/output_3dgs", help="Output directory for 3DGS model and renders")
     parser.add_argument("--iterations", type=int, default=7000, help="Number of 3DGS training iterations")
     parser.add_argument("--fps", type=int, default=15, help="FPS for the final 360-degree rotation video")
     parser.add_argument("--category", type=str, default="tops", help="Garment category (tops protects head/face/arms)")
-    parser.add_argument("--drive_dir", type=str, default=None, help="Optional Google Drive backup directory")
+    parser.add_argument("--drive_dir", type=str, default=None, help="Optional Drive / Export directory")
     return parser.parse_args()
 
 
 def find_default_inputs():
-    video_candidates = sorted(glob.glob("/content/drive/MyDrive/**/aodai_model*", recursive=True)) + \
-                       sorted(glob.glob("/content/drive/Shareddrives/**/aodai_model*", recursive=True)) + \
+    video_candidates = sorted(glob.glob("/kaggle/input/**/aodai_model*", recursive=True)) + \
+                       sorted(glob.glob("/kaggle/working/**/aodai_model*", recursive=True)) + \
+                       sorted(glob.glob("/content/drive/MyDrive/**/aodai_model*", recursive=True)) + \
+                       sorted(glob.glob("/content/**/aodai_model*", recursive=True)) + \
                        sorted(glob.glob("./DATA/**/aodai_model*", recursive=True)) + \
                        sorted(glob.glob("./**/*model*.mp4", recursive=True))
     
-    cloth_candidates = sorted(glob.glob("/content/drive/MyDrive/**/aodai_cloth*", recursive=True)) + \
-                       sorted(glob.glob("/content/drive/Shareddrives/**/aodai_cloth*", recursive=True)) + \
+    cloth_candidates = sorted(glob.glob("/kaggle/input/**/aodai_cloth*", recursive=True)) + \
+                       sorted(glob.glob("/kaggle/working/**/aodai_cloth*", recursive=True)) + \
+                       sorted(glob.glob("/content/drive/MyDrive/**/aodai_cloth*", recursive=True)) + \
+                       sorted(glob.glob("/content/**/aodai_cloth*", recursive=True)) + \
                        sorted(glob.glob("./DATA/**/aodai_cloth*", recursive=True)) + \
                        sorted(glob.glob("./**/*cloth*.jpg", recursive=True))
 
@@ -193,7 +203,7 @@ def run_step3_train_3dgs(work_dir: str, output_dir: str, iterations: int, fps: i
     output_dir = os.path.abspath(output_dir)
     shutil.rmtree(output_dir, ignore_errors=True)
 
-    gaussian_repo = "/content/gaussian-splatting"
+    gaussian_repo = "/kaggle/working/gaussian-splatting" if os.path.exists("/kaggle") else "/content/gaussian-splatting"
     if not os.path.exists(gaussian_repo):
         gaussian_repo = "./gaussian-splatting"
 
@@ -230,7 +240,7 @@ def run_step3_train_3dgs(work_dir: str, output_dir: str, iterations: int, fps: i
         dest_video = os.path.join(drive_out, "AODAI_3D_360_FINAL.mp4")
         shutil.copy(output_video_path, dest_video)
         subprocess.run(f'cp -r "{output_dir}/point_cloud/iteration_{iterations}"/* "{drive_out}/" 2>/dev/null || true', shell=True)
-        print(f"💾 ĐÃ LƯU KẾT QUẢ VÀO GOOGLE DRIVE: {dest_video}")
+        print(f"💾 ĐÃ LƯU KẾT QUẢ VÀO: {dest_video}")
 
     return output_video_path
 
@@ -248,12 +258,10 @@ def main():
     assert cloth_path and os.path.exists(cloth_path), f"❌ Không tìm thấy ảnh áo dài tại: {cloth_path}"
 
     drive_dir = args.drive_dir
-    if not drive_dir and cloth_path.startswith("/content/drive/"):
-        drive_dir = os.path.dirname(cloth_path)
 
     print(f"🎬 Video input : {video_path}")
     print(f"👔 Cloth input : {cloth_path}")
-    print(f"📁 Drive Backup: {drive_dir}")
+    print(f"📁 Export Dir  : {drive_dir}")
 
     run_step1_colmap(video_path, args.work_dir)
     run_step2_fashn_tryon(args.work_dir, cloth_path, args.weights_dir, args.category, drive_dir)

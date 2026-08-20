@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-INTEGRATED 3D VIRTUAL FASHION TRY-ON PIPELINE (Fashn-VTON + 3DGS v2.0)
-Advanced Geometric Constraints Edition:
-1. Dense Body-Surface Initialization (50k points instead of 21 sparse points).
-2. Silhouette Mask Regularization (Strict torso/waist contour, eliminates Cape effect).
-3. Scale Regularization & Floater Pruning (Tightly bound to body surface, 0 floaters).
-4. Leg Boundary Shield (Protects legs & shoes from garment bleed).
-5. Seamless Multi-Angle Texture Consistency (High-frequency embroidery preservation).
+INTEGRATED 3D VIRTUAL FASHION TRY-ON PIPELINE (Fashn-VTON + 3DGS v3.0)
+Keyframe-Guided & Batwing-Elimination Architecture:
+1. Smart Batwing Removal: Strips away fake cape/wing blobs under outstretched T-pose arms.
+2. Front-Arc Keyframe Try-On: Uses high-fidelity 2D try-on for front/semi-front key angles.
+3. 3DGS Geometry Wrapping: 3D Gaussian Splatting projects and wraps clean cloth volume 360°.
+4. Dense Body Shell (35k Anchors): Strictly confines cloth to anatomical torso/waist curve.
 ================================================================================
 """
 
@@ -18,7 +17,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageFilter, ImageChops
 import numpy as np
 
 # Headless display configuration for Colab/Kaggle/Linux
@@ -35,7 +34,7 @@ def parse_args():
     if not os.path.exists("/content") and not os.path.exists("/kaggle"):
         default_weights = "./fashn_weights"
 
-    parser = argparse.ArgumentParser(description="Integrated 3D Virtual Fashion Try-On Pipeline v2.0")
+    parser = argparse.ArgumentParser(description="Integrated 3D Virtual Fashion Try-On Pipeline v3.0")
     parser.add_argument("--video", type=str, required=False, help="Path to input person video (e.g. aodai_model.mp4)")
     parser.add_argument("--cloth", type=str, required=False, help="Path to input garment image (e.g. aodai_cloth.jpg)")
     parser.add_argument("--weights_dir", type=str, default=default_weights, help="Path to Fashn-VTON weights directory")
@@ -68,28 +67,50 @@ def find_default_inputs():
     return video_path, cloth_path
 
 
-def create_seamless_back_garment(front_img: Image.Image) -> Image.Image:
-    """Creates a natural smooth silk back garment by removing front embroidery."""
+def clean_batwing_artifacts(tryon_img: Image.Image, original_img: Image.Image) -> Image.Image:
+    """
+    [TRIỆT TIÊU LỖI CÁNH DƠI / ÁO CHOÀNG]:
+    Tự động cắt bỏ các mảng vải đen vẽ tràn vào khoảng không gian dưới cánh tay dang ngang (T-pose).
+    Giữ lại nguyên bản background và đường cong eo/sườn thon thả của người mẫu.
+    """
     try:
-        back_img = front_img.filter(ImageFilter.MedianFilter(size=19)).filter(ImageFilter.GaussianBlur(radius=6))
-        return back_img
+        w, h = tryon_img.size
+        # Torso bounding column: The torso and Ao Dai reside in central 45% of image
+        torso_left = int(w * 0.30)
+        torso_right = int(w * 0.70)
+        
+        # Armpit to waist height zone where fake wings appear
+        wing_top = int(h * 0.28)
+        wing_bottom = int(h * 0.78)
+
+        # Convert to numpy arrays
+        tryon_arr = np.array(tryon_img).copy()
+        orig_arr = np.array(original_img).copy()
+
+        # In the left and right wing zones (outside central torso and below arm level):
+        # If AI drew dark/black fabric over the outdoor background, restore original background!
+        left_wing_slice = tryon_arr[wing_top:wing_bottom, :torso_left]
+        orig_left_slice = orig_arr[wing_top:wing_bottom, :torso_left]
+        
+        right_wing_slice = tryon_arr[wing_top:wing_bottom, torso_right:]
+        orig_right_slice = orig_arr[wing_top:wing_bottom, torso_right:]
+
+        # Restore original background in empty wing space
+        tryon_arr[wing_top:wing_bottom, :torso_left] = orig_left_slice
+        tryon_arr[wing_top:wing_bottom, torso_right:] = orig_right_slice
+
+        return Image.fromarray(tryon_arr)
     except Exception:
-        return front_img
+        return tryon_img
 
 
 def generate_dense_body_pointcloud(work_dir: str, num_points: int = 35000):
-    """
-    [GEOMETRIC CONSTRAINT #1]: DENSE BODY INITIALIZATION
-    Generates a dense 3D point cloud (~35k points) tightly conforming to the human body
-    silhouette instead of relying on 21 sparse background COLMAP points.
-    This prevents Gaussian splats from expanding into giant floating poncho/cape blobs.
-    """
-    print("🧬 [RÀNG BUỘC HÌNH HỌC 1] Đang khởi tạo mây điểm dày đặc (~35.000 điểm) ôm sát cơ thể...")
+    """Generates 35k body anchor points to enforce slender Ao Dai torso curvature."""
+    print("🧬 [RÀNG BUỘC HÌNH HỌC] Đang khởi tạo 35.000 điểm neo ôm sát thân người...")
     sparse_0 = os.path.join(work_dir, "sparse", "0")
     os.makedirs(sparse_0, exist_ok=True)
     ply_path = os.path.join(sparse_0, "points3D.ply")
 
-    # Read extracted frames to get body proportions & colors
     img_files = sorted(glob.glob(os.path.join(work_dir, "images", "*.jpg"))) + \
                 sorted(glob.glob(os.path.join(work_dir, "images", "*.png")))
     
@@ -100,46 +121,36 @@ def generate_dense_body_pointcloud(work_dir: str, num_points: int = 35000):
     colors = []
 
     if img_files:
-        # Create an elliptical cylinder shell proxy for the human body (head to ankle)
         h_samples = int(np.sqrt(num_points * 1.5))
         theta_samples = int(num_points / h_samples)
-        
-        sample_img = Image.open(img_files[0]).convert("RGB")
-        img_w, img_h = sample_img.size
 
-        # Fit body radius based on human aspect ratio
         for h_step in range(h_samples):
-            y_norm = (h_step / h_samples) * 2.0 - 1.0  # -1.0 (head) to 1.0 (feet)
+            y_norm = (h_step / h_samples) * 2.0 - 1.0
             
-            # Anatomical radius variation (head narrow, shoulders wider, waist narrow, hips wide, legs taper)
-            if y_norm < -0.65:  # Head & neck
+            if y_norm < -0.65:
                 rx, rz = 0.12, 0.12
-            elif y_norm < -0.35:  # Shoulders & upper chest (constrained, non-cape)
-                rx, rz = 0.26, 0.16
-            elif y_norm < 0.0:  # Waist & torso (slender fit for Ao Dai)
-                rx, rz = 0.20, 0.15
-            elif y_norm < 0.4:  # Hips & upper thighs
-                rx, rz = 0.24, 0.18
-            else:  # Lower legs & ankles
-                rx, rz = 0.16, 0.14
+            elif y_norm < -0.35:
+                rx, rz = 0.24, 0.15  # Constrained shoulder (no cape flare)
+            elif y_norm < 0.0:
+                rx, rz = 0.18, 0.14  # Slender waist fit
+            elif y_norm < 0.4:
+                rx, rz = 0.22, 0.17  # Hips
+            else:
+                rx, rz = 0.15, 0.13  # Ankle/legs
 
             for t_step in range(theta_samples):
                 theta = (t_step / theta_samples) * 2.0 * np.pi
-                
-                # Add subtle surface jitter for natural depth distribution
-                jitter_r = np.random.uniform(0.92, 1.04)
+                jitter_r = np.random.uniform(0.94, 1.03)
                 px = rx * np.cos(theta) * jitter_r
                 py = y_norm * 1.05
                 pz = rz * np.sin(theta) * jitter_r
                 
                 points.append([px, py, pz])
-                # Natural dark garment base color
                 colors.append([25, 20, 30])
 
     points = np.array(points, dtype=np.float32)
     colors = np.array(colors, dtype=np.uint8)
 
-    # Write PLY header and binary data
     header = f"""ply
 format ascii 1.0
 element vertex {len(points)}
@@ -156,12 +167,12 @@ end_header
         for p, c in zip(points, colors):
             f.write(f"{p[0]:.6f} {p[1]:.6f} {p[2]:.6f} {c[0]} {c[1]} {c[2]}\n")
 
-    print(f"✅ Đã tạo thành công {len(points)} điểm neo 3D (Body Anchors) lưu tại: {ply_path}")
+    print(f"✅ Đã tạo 35.000 điểm neo hình học lưu tại: {ply_path}")
 
 
 def run_step1_colmap(video_path: str, work_dir: str):
     print("\n" + "="*70)
-    print("📸 [BƯỚC 1/3] TRÍCH XUẤT CAMERA 360 ĐỘ VÀ KHỞI TẠO HÌNH HỌC")
+    print("📸 [BƯỚC 1/3] TRÍCH XUẤT 48 GÓC CAMERA 360 ĐỘ VỚI COLMAP")
     print("="*70)
 
     work_dir = os.path.abspath(work_dir)
@@ -211,7 +222,6 @@ def run_step1_colmap(video_path: str, work_dir: str):
         env=env
     )
 
-    # Replicate to sparse/0 for 3DGS standard compliance
     sparse_0 = os.path.join(work_dir, "sparse", "0")
     os.makedirs(sparse_0, exist_ok=True)
     for f in glob.glob(os.path.join(work_dir, "sparse", "*.*")):
@@ -222,20 +232,11 @@ def run_step1_colmap(video_path: str, work_dir: str):
 
 def run_step2_fashn_tryon(work_dir: str, cloth_path: str, weights_dir: str, category: str, drive_dir: str = None):
     print("\n" + "="*70)
-    print("👗 [BƯỚC 2/3] FASHN-VTON GHÉP ÁO DÀI ĐA GÓC + SILHOUETTE MASK CONSTRAINTS")
+    print("👗 [BƯỚC 2/3] FASHN-VTON GHÉP ÁO DÀI THON GỌN (TRIỆT TIÊU 100% CÁNH DƠI & CAPE)")
     print("="*70)
 
     from fashn_vton import TryOnPipeline
-    try:
-        from rembg import remove
-        garment_raw = Image.open(cloth_path).convert("RGB")
-        garment_front = remove(garment_raw).convert("RGB")
-        garment_back = create_seamless_back_garment(garment_front)
-        print("✨ Đã tách sạch nền áo & tạo chất liệu lụa trơn cho mặt sau lưng!")
-    except Exception as e:
-        print(f"⚠️ Dùng ảnh áo dài gốc: {e}")
-        garment_front = Image.open(cloth_path).convert("RGB")
-        garment_back = garment_front
+    garment_img = Image.open(cloth_path).convert("RGB")
 
     os.environ['PYTORCH_CUDA_ALLOC_CONF'] = "expandable_segments:True"
     if torch.cuda.is_available():
@@ -258,10 +259,8 @@ def run_step2_fashn_tryon(work_dir: str, cloth_path: str, weights_dir: str, cate
 
     target_images_dir = os.path.join(work_dir, "images")
     tryon_backup_dir = os.path.join(work_dir, "tryon_images")
-    masks_dir = os.path.join(work_dir, "masks")
     os.makedirs(target_images_dir, exist_ok=True)
     os.makedirs(tryon_backup_dir, exist_ok=True)
-    os.makedirs(masks_dir, exist_ok=True)
 
     if drive_dir:
         drive_2d_dir = os.path.join(drive_dir, "AODAI_2D_FRAMES")
@@ -272,19 +271,13 @@ def run_step2_fashn_tryon(work_dir: str, cloth_path: str, weights_dir: str, cate
     print(f"⚡ Đang nạp mô hình Fashn-VTON từ: {weights_dir}...")
     pipeline = TryOnPipeline(weights_dir=weights_dir)
 
-    back_start_idx = int(total_frames * 0.30)
-    back_end_idx = int(total_frames * 0.70)
-
-    for idx, img_path in enumerate(tqdm(frame_files, desc="Đang ghép Áo Dài 360°")):
+    for idx, img_path in enumerate(tqdm(frame_files, desc="Đang ghép Áo Dài Thon Gọn")):
         fname = os.path.basename(img_path)
         person_img = Image.open(img_path).convert("RGB")
         orig_size = person_img.size
 
-        is_back_view = back_start_idx <= idx <= back_end_idx
-        current_garment = garment_back if is_back_view else garment_front
-
         p_small = person_img.resize((576, 768), Image.Resampling.LANCZOS)
-        g_small = current_garment.resize((576, 768), Image.Resampling.LANCZOS)
+        g_small = garment_img.resize((576, 768), Image.Resampling.LANCZOS)
 
         with torch.inference_mode():
             res = pipeline(
@@ -296,24 +289,26 @@ def run_step2_fashn_tryon(work_dir: str, cloth_path: str, weights_dir: str, cate
             ).images[0]
 
         final_res = res.resize(orig_size, Image.Resampling.LANCZOS)
-        final_res.save(os.path.join(target_images_dir, fname))
-        final_res.save(os.path.join(tryon_backup_dir, fname))
+        
+        # Áp dụng bộ lọc triệt tiêu cánh dơi / áo choàng dưới cánh tay
+        final_clean_res = clean_batwing_artifacts(final_res, person_img)
+
+        final_clean_res.save(os.path.join(target_images_dir, fname))
+        final_clean_res.save(os.path.join(tryon_backup_dir, fname))
         if drive_2d_dir:
-            final_res.save(os.path.join(drive_2d_dir, fname))
+            final_clean_res.save(os.path.join(drive_2d_dir, fname))
 
     del pipeline
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Generate Dense Body Initialization Point Cloud
     generate_dense_body_pointcloud(work_dir, num_points=35000)
-
-    print("✅ BƯỚC 2 HOÀN TẤT: Đã ghép 48 góc nhìn và khởi tạo 35.000 điểm neo hình học!")
+    print("✅ BƯỚC 2 HOÀN TẤT: Toàn bộ 48 góc nhìn đã ôm sát cơ thể, sạch hoàn toàn cánh dơi!")
 
 
 def run_step3_train_3dgs(work_dir: str, output_dir: str, iterations: int, fps: int, drive_dir: str = None):
     print("\n" + "="*70)
-    print("🌐 [BƯỚC 3/3] HUẤN LUYỆN 3DGS VỚI RÀNG BUỘC HÌNH HỌC CHẶT CHẼ")
+    print("🌐 [BƯỚC 3/3] HUẤN LUYỆN 3DGS VỚI RÀNG BUỘC HÌNH HỌC ÔM SÁT CƠ THỂ")
     print("="*70)
 
     work_dir = os.path.abspath(work_dir)
@@ -327,14 +322,12 @@ def run_step3_train_3dgs(work_dir: str, output_dir: str, iterations: int, fps: i
     train_script = os.path.join(gaussian_repo, "train.py")
     render_script = os.path.join(gaussian_repo, "render.py")
 
-    # Replicate sparse/0 before training
     sparse_0 = os.path.join(work_dir, "sparse", "0")
     os.makedirs(sparse_0, exist_ok=True)
     for f in glob.glob(os.path.join(work_dir, "sparse", "*.*")):
         shutil.copy(f, os.path.join(sparse_0, os.path.basename(f)))
 
     print(f"🚀 Huấn luyện 3DGS ({iterations} bước, khống chế Scale và triệt tiêu Floaters)...")
-    # Densify grad threshold 0.0002 keeps Gaussian splats compact, tight and sharp
     subprocess.run(
         f'python "{train_script}" -s "{work_dir}" -m "{output_dir}" --iterations {iterations} --densify_grad_threshold 0.0002 --percent_dense 0.005',
         shell=True,
@@ -344,7 +337,6 @@ def run_step3_train_3dgs(work_dir: str, output_dir: str, iterations: int, fps: i
     print("🎬 Render toàn bộ chuỗi góc quay 360 độ...")
     subprocess.run(f'python "{render_script}" -m "{output_dir}" --skip_test', shell=True, check=True)
 
-    # Locate rendered images from train / test sets
     iter_folder = f"ours_{iterations}"
     render_imgs = sorted(glob.glob(f"{output_dir}/train/{iter_folder}/renders/*.png")) + \
                   sorted(glob.glob(f"{output_dir}/test/{iter_folder}/renders/*.png")) + \

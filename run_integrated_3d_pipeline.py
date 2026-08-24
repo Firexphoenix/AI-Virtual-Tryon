@@ -173,6 +173,10 @@ def run_step2_remove_bg(tryon_image_path: str, output_dir: str) -> str:
     print("✂️  [BƯỚC 2/3] TÁCH NỀN — XỬ LÝ ẢNH RGBA CHO TRELLIS.2")
     print("=" * 70)
 
+    # Vô hiệu hóa cupy nếu bị xung đột binary ABI để pymatting dùng CPU an toàn
+    for mod in ["cupy", "cupy._core", "cupy._core.core", "cupy.cuda", "cupy.cuda.compiler"]:
+        sys.modules[mod] = None
+
     from rembg import remove, new_session
 
     person_img = Image.open(tryon_image_path).convert("RGB")
@@ -505,8 +509,13 @@ def main():
             category=args.category,
         )
 
-    # Bước 2: Tách nền
-    rgba_path = run_step2_remove_bg(tryon_path, output_dir)
+    # Bước 2: Tách nền (hoặc tái sử dụng nếu đã có)
+    existing_rgba = os.path.join(output_dir, "step2_rgba.png")
+    if args.skip_tryon and os.path.exists(existing_rgba):
+        print(f"⏭️  Bỏ qua Bước 2. Sử dụng ảnh RGBA đã tách nền có sẵn: {existing_rgba}")
+        rgba_path = existing_rgba
+    else:
+        rgba_path = run_step2_remove_bg(tryon_path, output_dir)
 
     # Bước 3: TRELLIS.2 → 3D
     result = run_step3_trellis_3d(

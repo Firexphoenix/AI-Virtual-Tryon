@@ -238,6 +238,22 @@ def run_step3_trellis_3d(
                 import subprocess
                 subprocess.run(["git", "submodule", "update", "--init", "--recursive"], cwd=tpath, check=False)
 
+    # Tự động tạo mock cho kaolin.utils.testing nếu chưa có kaolin
+    # (FlexiCubes chỉ dùng check_tensor từ kaolin để assert shape, không cần cài đặt Kaolin nặng)
+    try:
+        import kaolin
+    except ImportError:
+        import types
+        kaolin_mod = types.ModuleType("kaolin")
+        kaolin_utils = types.ModuleType("kaolin.utils")
+        kaolin_testing = types.ModuleType("kaolin.utils.testing")
+        kaolin_testing.check_tensor = lambda *args, **kwargs: True
+        kaolin_utils.testing = kaolin_testing
+        kaolin_mod.utils = kaolin_utils
+        sys.modules["kaolin"] = kaolin_mod
+        sys.modules["kaolin.utils"] = kaolin_utils
+        sys.modules["kaolin.utils.testing"] = kaolin_testing
+
     # Import TRELLIS
     try:
         from trellis.pipelines import TrellisImageTo3DPipeline

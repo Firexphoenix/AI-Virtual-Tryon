@@ -27,6 +27,13 @@ import numpy as np
 import torch
 from PIL import Image
 
+# ── Vô hiệu hóa CuPy bị lỗi ABI trên Kaggle (để rembg/pymatting dùng CPU thuần)
+for _m in [
+    "cupy", "cupy._core", "cupy._core.core", "cupy.cuda", "cupy.cuda.compiler",
+    "cupy.cuda.function", "cupy._core._scalar"
+]:
+    sys.modules[_m] = None
+
 # ── Thiết lập môi trường GPU & TRELLIS Backend ────────────────────────────────
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["QT_QPA_PLATFORM"] = "offscreen"

@@ -219,18 +219,36 @@ def run_step3_trellis_3d(
     print("🌐 [BƯỚC 3/3] TRELLIS.2 — SINH MÔ HÌNH 3D TỪ ẢNH 2D")
     print("=" * 70)
 
-    # Import TRELLIS (phải được cài sẵn theo hướng dẫn setup.sh)
+    # Tự động tìm và thêm thư mục TRELLIS vào sys.path
+    trellis_candidates = [
+        "/kaggle/working/TRELLIS",
+        "/kaggle/working/TRELLIS.2",
+        "./TRELLIS",
+        "../TRELLIS",
+        os.path.join(os.getcwd(), "TRELLIS"),
+    ]
+    for tpath in trellis_candidates:
+        if os.path.exists(tpath) and tpath not in sys.path:
+            sys.path.insert(0, os.path.abspath(tpath))
+
+    # Import TRELLIS
     try:
         from trellis.pipelines import TrellisImageTo3DPipeline
         from trellis.utils import render_utils, postprocessing_utils
-    except ImportError:
-        raise ImportError(
-            "\n❌ Không tìm thấy thư viện TRELLIS!\n"
-            "Vui lòng cài đặt TRELLIS trước khi chạy pipeline:\n"
-            "  git clone https://github.com/microsoft/TRELLIS /kaggle/working/TRELLIS\n"
-            "  cd /kaggle/working/TRELLIS && bash setup.sh\n"
-            "  pip install -e .\n"
-        )
+    except ImportError as e:
+        # Nếu chưa có thư mục TRELLIS, tự động clone về
+        if not any(os.path.exists(p) for p in trellis_candidates):
+            print("⬇️ Đang tải mã nguồn Microsoft TRELLIS về /kaggle/working/TRELLIS...")
+            import subprocess
+            subprocess.run(["git", "clone", "--recurse-submodules", "https://github.com/microsoft/TRELLIS", "/kaggle/working/TRELLIS"], check=True)
+            sys.path.insert(0, "/kaggle/working/TRELLIS")
+            try:
+                from trellis.pipelines import TrellisImageTo3DPipeline
+                from trellis.utils import render_utils, postprocessing_utils
+            except ImportError:
+                raise ImportError(f"\n❌ Lỗi import TRELLIS ({e})! Vui lòng chạy lệnh cài đặt TRELLIS trước.")
+        else:
+            raise ImportError(f"\n❌ Lỗi import TRELLIS ({e})! Vui lòng kiểm tra các thư viện phụ thuộc của TRELLIS.")
 
     os.makedirs(output_dir, exist_ok=True)
 

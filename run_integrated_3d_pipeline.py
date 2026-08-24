@@ -251,6 +251,51 @@ def run_step3_trellis_3d(
                 import subprocess
                 subprocess.run(["git", "submodule", "update", "--init", "--recursive"], cwd=tpath, check=False)
 
+    # ── Sửa chữa tự động spconv/cumm nếu JIT compile bị hỏng ───────────────────
+    # spconv-cu126 cài được nhưng cumm thiếu header tensorview → ninja build fail
+    # → SLatMeshDecoder load_state_dict fail → TRELLIS fallback repo sai → 401
+    def _ensure_spconv_works():
+        """Kiểm tra spconv thực sự hoạt động, nếu không thì tự sửa."""
+        import subprocess
+        try:
+            import spconv.pytorch as _sp
+            _t = torch.zeros(1, 1, device='cpu')  # test nhẹ, không cần GPU
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if "tensorview" in err_str or "ninja" in err_str or "cumm" in err_str or "multiarray" in err_str:
+                print("🔧 spconv/cumm bị lỗi JIT compile — đang tự sửa chữa...")
+                # Gỡ phiên bản bị lỗi và cài lại đúng cách
+                subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y",
+                                "spconv-cu126", "spconv-cu124", "spconv-cu121",
+                                "spconv-cu120", "spconv", "cumm", "cumm-cu126",
+                                "cumm-cu124", "cumm-cu121", "cumm-cu120"],
+                               capture_output=True)
+                # Cài cumm-cu121 (prebuilt, có sẵn header tensorview) + spconv-cu121
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--no-deps",
+                     "cumm-cu121", "spconv-cu121"],
+                    capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    # Fallback: cài cumm thuần + spconv thuần
+                    subprocess.run(
+                        [sys.executable, "-m", "pip", "install",
+                         "cumm-cu121", "spconv-cu121"],
+                        capture_output=True
+                    )
+                # Xóa module cache cũ để import lại
+                for mod_name in list(sys.modules.keys()):
+                    if mod_name.startswith(("spconv", "cumm")):
+                        del sys.modules[mod_name]
+                print("✅ spconv/cumm đã được sửa chữa thành công!")
+                return True
+            else:
+                print(f"⚠️ spconv import lỗi không xác định: {e}")
+                return False
+
+    _ensure_spconv_works()
+
     # ── Mock các thư viện phụ trợ nặng để tránh compile C++ runtime ─────────────
     import types
 

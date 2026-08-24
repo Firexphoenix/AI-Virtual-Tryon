@@ -104,19 +104,57 @@ def run_step1_fashn_tryon(
 
 
 def _find_fashn_weights() -> str:
-    """Tìm thư mục chứa weights của Fashn-VTON."""
+    """Tìm hoặc tự động tải weights của Fashn-VTON từ Hugging Face."""
+    from huggingface_hub import hf_hub_download
+
     candidates = [
         "/kaggle/working/fashn_weights",
         "/kaggle/input/fashn-vton/fashn_weights",
         "/content/fashn_weights",
         "./fashn_weights",
     ]
+    target_dir = None
     for p in candidates:
         if os.path.exists(p):
-            return p
-    # Fallback: tạo thư mục mới — pipeline sẽ tự tải weights từ HuggingFace
-    os.makedirs("/kaggle/working/fashn_weights", exist_ok=True)
-    return "/kaggle/working/fashn_weights"
+            target_dir = p
+            break
+    if not target_dir:
+        target_dir = "/kaggle/working/fashn_weights" if os.path.exists("/kaggle") else "./fashn_weights"
+        os.makedirs(target_dir, exist_ok=True)
+
+    dwpose_dir = os.path.join(target_dir, "dwpose")
+    os.makedirs(dwpose_dir, exist_ok=True)
+
+    model_path = os.path.join(target_dir, "model.safetensors")
+    yolox_path = os.path.join(dwpose_dir, "yolox_l.onnx")
+    dwpose_path = os.path.join(dwpose_dir, "dw-ll_ucoco_384.onnx")
+
+    if not os.path.exists(model_path):
+        print("⬇️ Đang tải Fashn-VTON model.safetensors (~2.1 GB)...")
+        hf_hub_download(
+            repo_id="fashn-ai/fashn-vton-1.5",
+            filename="model.safetensors",
+            local_dir=target_dir,
+        )
+
+    if not os.path.exists(yolox_path):
+        print("⬇️ Đang tải DWPose yolox_l.onnx...")
+        hf_hub_download(
+            repo_id="fashn-ai/DWPose",
+            filename="yolox_l.onnx",
+            local_dir=dwpose_dir,
+        )
+
+    if not os.path.exists(dwpose_path):
+        print("⬇️ Đang tải DWPose dw-ll_ucoco_384.onnx...")
+        hf_hub_download(
+            repo_id="fashn-ai/DWPose",
+            filename="dw-ll_ucoco_384.onnx",
+            local_dir=dwpose_dir,
+        )
+
+    print(f"✅ Đã sẵn sàng model weights tại: {target_dir}")
+    return target_dir
 
 
 # ══════════════════════════════════════════════════════════════════════════════

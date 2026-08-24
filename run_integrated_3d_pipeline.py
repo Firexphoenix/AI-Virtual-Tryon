@@ -219,7 +219,7 @@ def run_step3_trellis_3d(
     print("🌐 [BƯỚC 3/3] TRELLIS.2 — SINH MÔ HÌNH 3D TỪ ẢNH 2D")
     print("=" * 70)
 
-    # Tự động tìm và thêm thư mục TRELLIS vào sys.path
+    # Tự động tìm và thêm thư mục TRELLIS vào sys.path, đồng bộ submodules (FlexiCubes)
     trellis_candidates = [
         "/kaggle/working/TRELLIS",
         "/kaggle/working/TRELLIS.2",
@@ -228,15 +228,22 @@ def run_step3_trellis_3d(
         os.path.join(os.getcwd(), "TRELLIS"),
     ]
     for tpath in trellis_candidates:
-        if os.path.exists(tpath) and tpath not in sys.path:
-            sys.path.insert(0, os.path.abspath(tpath))
+        if os.path.exists(tpath):
+            if tpath not in sys.path:
+                sys.path.insert(0, os.path.abspath(tpath))
+            # Kiểm tra và tải submodule FlexiCubes nếu chưa có
+            flexicubes_init = os.path.join(tpath, "trellis", "representations", "mesh", "flexicubes", "flexicubes.py")
+            if not os.path.exists(flexicubes_init):
+                print(f"🔄 Đang đồng bộ submodules (FlexiCubes) tại {tpath}...")
+                import subprocess
+                subprocess.run(["git", "submodule", "update", "--init", "--recursive"], cwd=tpath, check=False)
 
     # Import TRELLIS
     try:
         from trellis.pipelines import TrellisImageTo3DPipeline
         from trellis.utils import render_utils, postprocessing_utils
     except ImportError as e:
-        # Nếu chưa có thư mục TRELLIS, tự động clone về
+        # Nếu chưa có thư mục TRELLIS, tự động clone về đầy đủ submodules
         if not any(os.path.exists(p) for p in trellis_candidates):
             print("⬇️ Đang tải mã nguồn Microsoft TRELLIS về /kaggle/working/TRELLIS...")
             import subprocess

@@ -34,6 +34,35 @@ for _m in [
 ]:
     sys.modules[_m] = None
 
+# ── Tự động cấu hình Include Headers cho cumm / spconv JIT compile ──────────
+_search_roots = sys.path + [
+    "/usr/local/lib/python3.12/dist-packages",
+    "/usr/local/lib/python3.11/dist-packages",
+    "/usr/local/lib/python3.10/dist-packages",
+    "/opt/conda/lib/python3.10/site-packages",
+]
+_found_includes = set()
+for _root in _search_roots:
+    if not os.path.isdir(_root):
+        continue
+    for _name in ["cumm", "pccm", "pybind11", "tensorview"]:
+        _pkg_dir = os.path.join(_root, _name)
+        if os.path.isdir(_pkg_dir):
+            _found_includes.add(_root)
+            _found_includes.add(_pkg_dir)
+            _inc = os.path.join(_pkg_dir, "include")
+            if os.path.isdir(_inc):
+                _found_includes.add(_inc)
+            _csrc = os.path.join(_pkg_dir, "csrc")
+            if os.path.isdir(_csrc):
+                _found_includes.add(_csrc)
+
+if _found_includes:
+    _extra_cpath = ":".join(sorted(_found_includes))
+    os.environ["CPATH"] = f"{_extra_cpath}:{os.environ.get('CPATH', '')}".strip(":")
+    os.environ["CPLUS_INCLUDE_PATH"] = f"{_extra_cpath}:{os.environ.get('CPLUS_INCLUDE_PATH', '')}".strip(":")
+    os.environ["CUMM_INCLUDE_PATH"] = _extra_cpath
+
 # ── Thiết lập môi trường GPU & TRELLIS Backend ────────────────────────────────
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -251,47 +280,72 @@ def run_step3_trellis_3d(
                 import subprocess
                 subprocess.run(["git", "submodule", "update", "--init", "--recursive"], cwd=tpath, check=False)
 
-    # ── Sửa chữa tự động spconv/cumm nếu JIT compile bị hỏng ───────────────────
-    # spconv-cu126 cài được nhưng cumm thiếu header tensorview → ninja build fail
-    # → SLatMeshDecoder load_state_dict fail → TRELLIS fallback repo sai → 401
+    # ── Cấu hình môi trường C++ Include cho cumm / spconv JIT compile ──────────
+    def _setup_cplus_includes():
+        """Tự động tìm tất cả các thư mục chứa tensorview/pybind11 để g++ tìm thấy header."""
+        search_roots = sys.path + [
+            "/usr/local/lib/python3.12/dist-packages",
+            "/usr/local/lib/python3.11/dist-packages",
+            "/usr/local/lib/python3.10/dist-packages",
+            "/opt/conda/lib/python3.10/site-packages",
+        ]
+        found_includes = set()
+        for root in search_roots:
+            if not os.path.isdir(root):
+                continue
+            for name in ["cumm", "pccm", "pybind11", "tensorview"]:
+                pkg_dir = os.path.join(root, name)
+                if os.path.isdir(pkg_dir):
+                    found_includes.add(root)
+                    found_includes.add(pkg_dir)
+                    inc_dir = os.path.join(pkg_dir, "include")
+                    if os.path.isdir(inc_dir):
+                        found_includes.add(inc_dir)
+                    csrc_dir = os.path.join(pkg_dir, "csrc")
+                    if os.path.isdir(csrc_dir):
+                        found_includes.add(csrc_dir)
+
+        if found_includes:
+            extra = ":".join(sorted(found_includes))
+            cur_cpath = os.environ.get("CPATH", "")
+            cur_cplus = os.environ.get("CPLUS_INCLUDE_PATH", "")
+            os.environ["CPATH"] = f"{extra}:{cur_cpath}".strip(":")
+            os.environ["CPLUS_INCLUDE_PATH"] = f"{extra}:{cur_cplus}".strip(":")
+            os.environ["CUMM_INCLUDE_PATH"] = extra
+
+        # Dọn dẹp cache build hỏng cũ nếu có
+        for root in search_roots:
+            bdir = os.path.join(root, "cumm", "build")
+            if os.path.isdir(bdir):
+                try:
+                    shutil.rmtree(bdir)
+                except Exception:
+                    pass
+
+    _setup_cplus_includes()
+
     def _ensure_spconv_works():
-        """Kiểm tra spconv thực sự hoạt động, nếu không thì tự sửa."""
+        """Kiểm tra và kích hoạt JIT compile của spconv/cumm trước khi nạp model."""
         import subprocess
         try:
             import spconv.pytorch as _sp
-            _t = torch.zeros(1, 1, device='cpu')  # test nhẹ, không cần GPU
+            # Tạo 1 layer sparse conv thật để ép cumm compile C++ ngay tại đây
+            _dummy = _sp.SubMConv3d(1, 1, 3, bias=False)
+            del _dummy
+            print("✅ spconv/cumm đã sẵn sàng hoạt động!")
             return True
         except Exception as e:
             err_str = str(e)
-            if "tensorview" in err_str or "ninja" in err_str or "cumm" in err_str or "multiarray" in err_str:
-                print("🔧 spconv/cumm bị lỗi JIT compile — đang tự sửa chữa...")
-                # Gỡ phiên bản bị lỗi và cài lại đúng cách
-                subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y",
-                                "spconv-cu126", "spconv-cu124", "spconv-cu121",
-                                "spconv-cu120", "spconv", "cumm", "cumm-cu126",
-                                "cumm-cu124", "cumm-cu121", "cumm-cu120"],
-                               capture_output=True)
-                # Cài cumm-cu121 (prebuilt, có sẵn header tensorview) + spconv-cu121
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--no-deps",
-                     "cumm-cu121", "spconv-cu121"],
-                    capture_output=True, text=True
-                )
-                if result.returncode != 0:
-                    # Fallback: cài cumm thuần + spconv thuần
-                    subprocess.run(
-                        [sys.executable, "-m", "pip", "install",
-                         "cumm-cu121", "spconv-cu121"],
-                        capture_output=True
-                    )
-                # Xóa module cache cũ để import lại
-                for mod_name in list(sys.modules.keys()):
-                    if mod_name.startswith(("spconv", "cumm")):
-                        del sys.modules[mod_name]
-                print("✅ spconv/cumm đã được sửa chữa thành công!")
+            print(f"🔧 spconv JIT compile gặp lỗi ({e}) — đang thiết lập include headers...")
+            _setup_cplus_includes()
+            try:
+                import spconv.pytorch as _sp
+                _dummy = _sp.SubMConv3d(1, 1, 3, bias=False)
+                del _dummy
+                print("✅ spconv/cumm đã compile thành công!")
                 return True
-            else:
-                print(f"⚠️ spconv import lỗi không xác định: {e}")
+            except Exception as e2:
+                print(f"⚠️ spconv JIT build fail ({e2}) — chuyển sang sparse backend dự phòng.")
                 return False
 
     _ensure_spconv_works()

@@ -257,7 +257,6 @@ def run_step3_trellis_3d(
     # Import TRELLIS
     try:
         from trellis.pipelines import TrellisImageTo3DPipeline
-        from trellis.utils import postprocessing_utils
     except ImportError as e:
         # Nếu chưa có thư mục TRELLIS, tự động clone về đầy đủ submodules
         if not any(os.path.exists(p) for p in trellis_candidates):
@@ -267,18 +266,23 @@ def run_step3_trellis_3d(
             sys.path.insert(0, "/kaggle/working/TRELLIS")
             try:
                 from trellis.pipelines import TrellisImageTo3DPipeline
-                from trellis.utils import postprocessing_utils
             except ImportError:
                 raise ImportError(f"\n❌ Lỗi import TRELLIS ({e})! Vui lòng chạy lệnh cài đặt TRELLIS trước.")
         else:
             raise ImportError(f"\n❌ Lỗi import TRELLIS ({e})! Vui lòng kiểm tra các thư viện phụ thuộc của TRELLIS.")
 
-    # Import render_utils an toàn (phụ thuộc nvdiffrast)
+    # Import postprocessing_utils an toàn (nếu có nvdiffrast)
+    try:
+        from trellis.utils import postprocessing_utils
+    except Exception as exc:
+        print(f"ℹ️ postprocessing_utils chạy ở chế độ cơ bản ({exc})")
+        postprocessing_utils = None
+
+    # Import render_utils an toàn (nếu có nvdiffrast)
     try:
         from trellis.utils import render_utils
         has_render_utils = True
     except Exception as exc:
-        print(f"⚠️ Cảnh báo: render_utils chưa sẵn sàng ({exc}). Sẽ ưu tiên xuất .glb và .ply trước.")
         render_utils = None
         has_render_utils = False
 
@@ -323,15 +327,24 @@ def run_step3_trellis_3d(
 
     # Xuất file .glb (Textured Mesh)
     print(f"📦 Đang xuất Textured Mesh → {glb_path}")
-    glb = postprocessing_utils.to_glb(
-        outputs["gaussian"][0],
-        outputs["mesh"][0],
-        simplify=0.95,      # Giữ 95% polygon detail, giảm kích thước file
-        texture_size=1024,
-    )
-    glb.export(glb_path)
-    glb_size_mb = os.path.getsize(glb_path) / 1024 ** 2
-    print(f"   ✅ .glb xuất thành công ({glb_size_mb:.1f} MB)")
+    try:
+        if postprocessing_utils is not None and hasattr(postprocessing_utils, "to_glb"):
+            glb = postprocessing_utils.to_glb(
+                outputs["gaussian"][0],
+                outputs["mesh"][0],
+                simplify=0.95,      # Giữ 95% polygon detail, giảm kích thước file
+                texture_size=1024,
+            )
+            glb.export(glb_path)
+        else:
+            outputs["mesh"][0].export(glb_path)
+        glb_size_mb = os.path.getsize(glb_path) / 1024 ** 2
+        print(f"   ✅ .glb xuất thành công ({glb_size_mb:.1f} MB)")
+    except Exception as glb_err:
+        print(f"⚠️ Thử xuất OBJ/GLB trực tiếp ({glb_err})...")
+        outputs["mesh"][0].export(glb_path)
+        glb_size_mb = os.path.getsize(glb_path) / 1024 ** 2
+        print(f"   ✅ .glb xuất thành công ({glb_size_mb:.1f} MB)")
 
     # Xuất file .ply (3D Gaussian Splatting)
     print(f"✨ Đang xuất 3D Gaussian Splatting → {ply_path}")

@@ -27,9 +27,11 @@ import numpy as np
 import torch
 from PIL import Image
 
-# ── Thiết lập môi trường GPU ──────────────────────────────────────────────────
+# ── Thiết lập môi trường GPU & TRELLIS Backend ────────────────────────────────
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+os.environ["ATTN_BACKEND"] = "xformers"
+os.environ["SPARSE_BACKEND"] = "spconv"
 
 # ── Cache HuggingFace về Kaggle working dir để tránh mất khi restart ──────────
 if os.path.exists("/kaggle"):

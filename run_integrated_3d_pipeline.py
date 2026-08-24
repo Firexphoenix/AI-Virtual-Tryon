@@ -257,7 +257,7 @@ def run_step3_trellis_3d(
     # Import TRELLIS
     try:
         from trellis.pipelines import TrellisImageTo3DPipeline
-        from trellis.utils import render_utils, postprocessing_utils
+        from trellis.utils import postprocessing_utils
     except ImportError as e:
         # Nếu chưa có thư mục TRELLIS, tự động clone về đầy đủ submodules
         if not any(os.path.exists(p) for p in trellis_candidates):
@@ -267,11 +267,20 @@ def run_step3_trellis_3d(
             sys.path.insert(0, "/kaggle/working/TRELLIS")
             try:
                 from trellis.pipelines import TrellisImageTo3DPipeline
-                from trellis.utils import render_utils, postprocessing_utils
+                from trellis.utils import postprocessing_utils
             except ImportError:
                 raise ImportError(f"\n❌ Lỗi import TRELLIS ({e})! Vui lòng chạy lệnh cài đặt TRELLIS trước.")
         else:
             raise ImportError(f"\n❌ Lỗi import TRELLIS ({e})! Vui lòng kiểm tra các thư viện phụ thuộc của TRELLIS.")
+
+    # Import render_utils an toàn (phụ thuộc nvdiffrast)
+    try:
+        from trellis.utils import render_utils
+        has_render_utils = True
+    except Exception as exc:
+        print(f"⚠️ Cảnh báo: render_utils chưa sẵn sàng ({exc}). Sẽ ưu tiên xuất .glb và .ply trước.")
+        render_utils = None
+        has_render_utils = False
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -330,27 +339,34 @@ def run_step3_trellis_3d(
     ply_size_mb = os.path.getsize(ply_path) / 1024 ** 2
     print(f"   ✅ .ply xuất thành công ({ply_size_mb:.1f} MB)")
 
-    # Render video xoay 360°
-    print(f"🎬 Đang render video 360° (FPS={fps}, 120 frames)...")
-    video_frames = render_utils.render_video(
-        outputs["gaussian"][0],
-        num_frames=120,
-        resolution=512,
-        r=2.0,         # Khoảng cách camera so với tâm đối tượng
-    )["color"]         # List of np.ndarray frames (H, W, 3), float [0,1]
+    # Render video xoay 360° (nếu có render_utils)
+    if has_render_utils and render_utils is not None:
+        try:
+            print(f"🎬 Đang render video 360° (FPS={fps}, 120 frames)...")
+            video_frames = render_utils.render_video(
+                outputs["gaussian"][0],
+                num_frames=120,
+                resolution=512,
+                r=2.0,         # Khoảng cách camera so với tâm đối tượng
+            )["color"]         # List of np.ndarray frames (H, W, 3), float [0,1]
 
-    # Lưu video bằng imageio (không cần ffmpeg subprocess)
-    with imageio.get_writer(
-        video_path, fps=fps, codec="libx264", quality=8, pixelformat="yuv420p"
-    ) as writer:
-        for frame in video_frames:
-            if frame.max() <= 1.0:
-                frame = (frame * 255).astype(np.uint8)
-            writer.append_data(frame)
+            # Lưu video bằng imageio (không cần ffmpeg subprocess)
+            with imageio.get_writer(
+                video_path, fps=fps, codec="libx264", quality=8, pixelformat="yuv420p"
+            ) as writer:
+                for frame in video_frames:
+                    if frame.max() <= 1.0:
+                        frame = (frame * 255).astype(np.uint8)
+                    writer.append_data(frame)
 
-    video_size_mb = os.path.getsize(video_path) / 1024 ** 2
-    print(f"   ✅ Video 360° xuất thành công ({video_size_mb:.1f} MB)")
-
+            video_size_mb = os.path.getsize(video_path) / 1024 ** 2
+            print(f"   ✅ Video 360° xuất thành công ({video_size_mb:.1f} MB)")
+        except Exception as v_exc:
+            print(f"⚠️ Render video bỏ qua do lỗi rasterizer ({v_exc}). File 3D (.glb, .ply) đã được tạo đầy đủ!")
+            video_path = None
+    else:
+        print("ℹ️ Bỏ qua render video (cài thêm nvdiffrast nếu cần render video MP4).")
+        video_path = None
     del pipeline, outputs
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

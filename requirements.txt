@@ -57,6 +57,8 @@ scikit-learn>=1.4.0
 einops>=0.7.0
 omegaconf>=2.3.0
 gradio>=4.0.0
+open3d>=0.18.0
+git+https://github.com/EasternJournalist/utils3d.git
 
 # ── Monitoring & Logging (tùy chọn) ─────────────────────────────────────────
 # wandb  # Bỏ comment nếu cần logging

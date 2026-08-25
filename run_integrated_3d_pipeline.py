@@ -29,14 +29,39 @@ from PIL import Image
 
 # ── Mock CuPy an toàn (để einops và pymatting không bị lỗi import) ─────────────
 import types
+
+class _DummyRawKernel:
+    def __init__(self, *args, **kwargs): pass
+    def __call__(self, *args, **kwargs): pass
+
+class _DummyStream:
+    def __init__(self, *args, **kwargs): pass
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+
 _cupy_mock = types.ModuleType("cupy")
 _cupy_mock.ndarray = type("ndarray", (), {})
+_cupy_mock.RawKernel = _DummyRawKernel
+_cupy_mock.RawModule = type("RawModule", (), {
+    "__init__": lambda *a, **k: None,
+    "get_function": lambda *a, **k: (lambda *args, **kwargs: None),
+})
 _cupy_mock.is_available = lambda: False
-_cupy_mock._core = types.ModuleType("cupy._core")
+_cupy_mock.asarray = lambda x, *a, **k: x
+_cupy_mock.asnumpy = lambda x, *a, **k: np.asarray(x)
+_cupy_mock.zeros = lambda *a, **k: np.zeros(*a, **k)
+_cupy_mock.ones = lambda *a, **k: np.ones(*a, **k)
+_cupy_mock.empty = lambda *a, **k: np.empty(*a, **k)
 _cupy_mock.cuda = types.ModuleType("cupy.cuda")
+_cupy_mock.cuda.Stream = _DummyStream
+_cupy_mock.cuda.Device = type("Device", (), {"__init__": lambda *a, **k: None, "use": lambda *a, **k: None})
+_cupy_mock.cuda.runtime = types.ModuleType("cupy.cuda.runtime")
+_cupy_mock._core = types.ModuleType("cupy._core")
+_cupy_mock._core._scalar = types.ModuleType("cupy._core._scalar")
+
 for _m in [
     "cupy", "cupy._core", "cupy._core.core", "cupy.cuda", "cupy.cuda.compiler",
-    "cupy.cuda.function", "cupy._core._scalar"
+    "cupy.cuda.function", "cupy._core._scalar", "cupy.cuda.runtime"
 ]:
     sys.modules[_m] = _cupy_mock
 

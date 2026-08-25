@@ -27,12 +27,18 @@ import numpy as np
 import torch
 from PIL import Image
 
-# ── Vô hiệu hóa CuPy bị lỗi ABI trên Kaggle (để rembg/pymatting dùng CPU thuần)
+# ── Mock CuPy an toàn (để einops và pymatting không bị lỗi import) ─────────────
+import types
+_cupy_mock = types.ModuleType("cupy")
+_cupy_mock.ndarray = type("ndarray", (), {})
+_cupy_mock.is_available = lambda: False
+_cupy_mock._core = types.ModuleType("cupy._core")
+_cupy_mock.cuda = types.ModuleType("cupy.cuda")
 for _m in [
     "cupy", "cupy._core", "cupy._core.core", "cupy.cuda", "cupy.cuda.compiler",
     "cupy.cuda.function", "cupy._core._scalar"
 ]:
-    sys.modules[_m] = None
+    sys.modules[_m] = _cupy_mock
 
 # ── Tự động cấu hình Include Headers cho cumm / spconv JIT compile ──────────
 _search_roots = sys.path + [

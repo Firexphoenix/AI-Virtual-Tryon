@@ -114,14 +114,29 @@ def run_step1_fashn_tryon(
     p_resized = person_img.resize((576, 768), Image.Resampling.LANCZOS)
     c_resized = cloth_img.resize((576, 768), Image.Resampling.LANCZOS)
 
+    # Tối ưu hóa GPU & Tensor Cores
+    chosen_dtype = torch.bfloat16
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.set_float32_matmul_precision("high")
+        gpu_count = torch.cuda.device_count()
+        gpu_name = torch.cuda.get_device_name(0)
+        cap = torch.cuda.get_device_capability(0)
+        # Trên GPU T4 (sm_75) dùng FP16 để tận dụng phần cứng Tensor Cores (nhanh gấp 2-3x so với BF16)
+        if cap[0] < 8:
+            chosen_dtype = torch.float16
+        print(f"🎮 GPU: {gpu_name} (Số lượng: {gpu_count}) | Precision: {chosen_dtype} Tensor Cores")
         torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        for i in range(gpu_count):
+            torch.cuda.set_device(i)
+            torch.cuda.empty_cache()
+        torch.cuda.set_device(0)
 
     weights_dir = _find_fashn_weights()
     print(f"⚡ Đang tải Fashn-VTON từ: {weights_dir}")
-    pipeline = TryOnPipeline(weights_dir=weights_dir)
+    try:
+        pipeline = TryOnPipeline(weights_dir=weights_dir, dtype=chosen_dtype)
+    except TypeError:
+        pipeline = TryOnPipeline(weights_dir=weights_dir)
 
     print(f"🎨 Đang ghép áo [{category}] vào người mẫu... ({num_timesteps} bước diffusion)")
     with torch.inference_mode():
@@ -135,7 +150,10 @@ def run_step1_fashn_tryon(
 
     del pipeline
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        for i in range(torch.cuda.device_count()):
+            torch.cuda.set_device(i)
+            torch.cuda.empty_cache()
+        torch.cuda.set_device(0)
     gc.collect()
 
     # Khôi phục kích thước gốc
@@ -425,9 +443,15 @@ def run_step3_trellis_3d(
     pipeline.cuda()
 
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        free_vram = torch.cuda.mem_get_info()[0] / 1024 ** 3
-        print(f"💾 VRAM khả dụng: {free_vram:.1f} GB")
+        gpu_info_strs = []
+        for i in range(torch.cuda.device_count()):
+            torch.cuda.set_device(i)
+            torch.cuda.empty_cache()
+            free_gb = torch.cuda.mem_get_info(i)[0] / (1024 ** 3)
+            total_gb = torch.cuda.mem_get_info(i)[1] / (1024 ** 3)
+            gpu_info_strs.append(f"GPU {i} ({torch.cuda.get_device_name(i)}): {free_gb:.1f}/{total_gb:.1f} GB")
+        torch.cuda.set_device(0)
+        print(f"💾 VRAM khả dụng: " + " | ".join(gpu_info_strs))
 
     # Chạy inference TRELLIS.2
     print(f"🎲 Đang sinh mô hình 3D (seed={seed}, sparse_steps={sparse_steps}, slat_steps={slat_steps})...")

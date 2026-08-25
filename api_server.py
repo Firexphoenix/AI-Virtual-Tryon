@@ -50,14 +50,621 @@ from run_integrated_3d_pipeline import (
 )
 
 
-@app.get("/")
-def root():
-    return {
-        "status": "online",
-        "service": "ATPP 3D Fashion Try-On AI",
-        "version": "2.0.0",
-        "docs_url": "/docs",
-    }
+from fastapi.responses import HTMLResponse
+
+HTML_UI = """<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATPP AI 3D Virtual Try-On Studio</title>
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --accent: #ec4899;
+            --bg-dark: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(236, 72, 153, 0.15) 0px, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+            background: rgba(15, 23, 42, 0.6);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #a5b4fc, #f472b6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .badge {
+            font-size: 11px;
+            padding: 4px 10px;
+            background: rgba(99, 102, 241, 0.2);
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            color: #c7d2fe;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .main-container {
+            flex: 1;
+            max-width: 1300px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 30px 20px;
+            display: grid;
+            grid-template-columns: 460px 1fr;
+            gap: 30px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 26px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #f1f5f9;
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .dropzone {
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 14px;
+            padding: 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(15, 23, 42, 0.4);
+            position: relative;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .dropzone:hover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.05);
+            transform: translateY(-2px);
+        }
+
+        .dropzone.has-file {
+            border-style: solid;
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+
+        .dropzone img.preview {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+            border-radius: 12px;
+        }
+
+        .drop-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .drop-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .drop-hint {
+            font-size: 11px;
+            color: var(--text-sub);
+            margin-top: 4px;
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .btn-generate {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-generate:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(236, 72, 153, 0.5);
+        }
+
+        .btn-generate:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            filter: grayscale(0.5);
+        }
+
+        /* 3D Viewer Container */
+        .viewer-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-height: 520px;
+            position: relative;
+        }
+
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            flex: 1;
+            background: radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.95));
+            border-radius: 16px;
+            --poster-color: transparent;
+        }
+
+        .placeholder-viewer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 16px;
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            text-align: center;
+            padding: 20px;
+        }
+
+        .placeholder-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.8;
+        }
+
+        /* Progress & Loader */
+        .progress-box {
+            display: none;
+            margin-top: 16px;
+            padding: 14px;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 10px;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-bar-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            transition: width 0.4s ease;
+        }
+
+        .status-text {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .action-bar {
+            margin-top: 16px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn-action {
+            flex: 1;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: #f8fafc;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn-action:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-download {
+            background: rgba(34, 197, 94, 0.2);
+            border-color: rgba(34, 197, 94, 0.4);
+            color: #86efac;
+        }
+
+        .btn-download:hover {
+            background: rgba(34, 197, 94, 0.3);
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">
+            <span>🎽 ATPP 3D VIRTUAL TRY-ON</span>
+            <span class="badge">GPU AI v2.0</span>
+        </div>
+        <div>
+            <a href="/docs" target="_blank" style="color: var(--text-sub); text-decoration: none; font-size: 14px; font-weight: 600;">📖 API Docs</a>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Panel Điều Khiển & Upload -->
+        <div class="card">
+            <div class="section-title">
+                <span>📸</span> Tải Lên Ảnh Đầu Vào
+            </div>
+
+            <div class="upload-grid">
+                <!-- Dropzone Người Mẫu -->
+                <div class="dropzone" id="personDropzone" onclick="document.getElementById('personInput').click()">
+                    <input type="file" id="personInput" accept="image/*" style="display: none;" onchange="handleFile(this, 'person')">
+                    <div id="personEmpty">
+                        <div class="drop-icon">👤</div>
+                        <div class="drop-label">Ảnh Người Mẫu</div>
+                        <div class="drop-hint">Chụp toàn thân/nửa người</div>
+                    </div>
+                    <img id="personPreview" class="preview" style="display: none;">
+                </div>
+
+                <!-- Dropzone Trang Phục -->
+                <div class="dropzone" id="clothDropzone" onclick="document.getElementById('clothInput').click()">
+                    <input type="file" id="clothInput" accept="image/*" style="display: none;" onchange="handleFile(this, 'cloth')">
+                    <div id="clothEmpty">
+                        <div class="drop-icon">👗</div>
+                        <div class="drop-label">Ảnh Trang Phục</div>
+                        <div class="drop-hint">Áo Dài hoặc quần áo</div>
+                    </div>
+                    <img id="clothPreview" class="preview" style="display: none;">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="categorySelect">Loại Trang Phục (Category)</label>
+                <select id="categorySelect">
+                    <option value="one-pieces" selected>👗 Áo Dài / Đầm Nguyên Bộ (One-pieces)</option>
+                    <option value="tops">👕 Áo ngắn / Áo sơ mi (Tops)</option>
+                    <option value="bottoms">👖 Quần / Váy ngắn (Bottoms)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="qualitySelect">Chế Độ Tạo 3D (Quality & Speed)</label>
+                <select id="qualitySelect">
+                    <option value="turbo" selected>⚡ Turbo Mode (~15-20s, Khuyên dùng)</option>
+                    <option value="hd">💎 High Detail Mode (~30-40s, Chi tiết cao)</option>
+                </select>
+            </div>
+
+            <button class="btn-generate" id="generateBtn" onclick="startTryOn()">
+                <span>🚀 Thử Đồ & Sinh Mô Hình 3D</span>
+            </button>
+
+            <!-- Tiến trình xử lý -->
+            <div class="progress-box" id="progressBox">
+                <div class="status-text">
+                    <span id="statusLabel">Đang kết nối tới GPU...</span>
+                    <span id="percentLabel">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel 3D Viewer Trực Quan -->
+        <div class="card viewer-container">
+            <div class="section-title" style="justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span>🌐</span> Mô Hình 3D Interactive
+                </div>
+                <span class="badge" id="renderTimeBadge" style="display: none;">18.5s</span>
+            </div>
+
+            <div style="position: relative; flex: 1; display: flex;">
+                <model-viewer id="modelViewer" 
+                    camera-controls 
+                    touch-action="pan-y" 
+                    auto-rotate 
+                    shadow-intensity="1.5" 
+                    exposure="1" 
+                    loading="eager"
+                    ar
+                    style="display: none;">
+                </model-viewer>
+
+                <div class="placeholder-viewer" id="viewerPlaceholder">
+                    <div class="placeholder-icon">👗✨</div>
+                    <h3 style="font-size: 16px; margin-bottom: 6px;">Chưa Có Mô Hình 3D</h3>
+                    <p style="font-size: 13px; color: var(--text-sub); max-width: 320px;">
+                        Tải lên ảnh người mẫu và trang phục ở bên trái, sau đó bấm <b>"Thử Đồ & Sinh Mô Hình 3D"</b> để xem kết quả.
+                    </p>
+                </div>
+            </div>
+
+            <div class="action-bar" id="actionBar" style="display: none;">
+                <button class="btn-action" onclick="toggleRotate()">🔄 Bật/Tắt Xoay</button>
+                <button class="btn-action" onclick="resetCamera()">🎯 Đặt Lại Góc Nhìn</button>
+                <a id="downloadGlbBtn" class="btn-action btn-download" download="AODAI_3D_MODEL.glb">
+                    ⬇️ Tải File .GLB (3D)
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let personFile = null;
+        let clothFile = null;
+
+        function handleFile(input, type) {
+            if (input.files && input.files[0]) {
+                const file = input.files[0];
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    if (type === 'person') {
+                        personFile = file;
+                        document.getElementById('personPreview').src = e.target.result;
+                        document.getElementById('personPreview').style.display = 'block';
+                        document.getElementById('personEmpty').style.display = 'none';
+                        document.getElementById('personDropzone').classList.add('has-file');
+                    } else {
+                        clothFile = file;
+                        document.getElementById('clothPreview').src = e.target.result;
+                        document.getElementById('clothPreview').style.display = 'block';
+                        document.getElementById('clothEmpty').style.display = 'none';
+                        document.getElementById('clothDropzone').classList.add('has-file');
+                    }
+                }
+                reader.readAsDataURL(file);
+            }
+        }
+
+        async function startTryOn() {
+            if (!personFile || !clothFile) {
+                alert('Vui lòng tải lên đầy đủ cả 2 ảnh: Người mẫu và Trang phục!');
+                return;
+            }
+
+            const btn = document.getElementById('generateBtn');
+            const progressBox = document.getElementById('progressBox');
+            const statusLabel = document.getElementById('statusLabel');
+            const percentLabel = document.getElementById('percentLabel');
+            const progressBar = document.getElementById('progressBar');
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner"></div> Đang xử lý AI trên GPU...';
+            progressBox.style.display = 'block';
+
+            // Cập nhật tiến độ giả lập trực quan
+            let progress = 10;
+            progressBar.style.width = '10%';
+            statusLabel.innerText = 'Bước 1/3: Fashn-VTON ghép áo vào người mẫu...';
+            percentLabel.innerText = '15%';
+
+            const timer = setInterval(() => {
+                if (progress < 45) {
+                    progress += 5;
+                    statusLabel.innerText = 'Bước 1/3: Đang chạy 2D Diffusion...';
+                } else if (progress < 75) {
+                    progress += 3;
+                    statusLabel.innerText = 'Bước 2/3: Rembg tách nền trong suốt RGBA...';
+                } else if (progress < 92) {
+                    progress += 2;
+                    statusLabel.innerText = 'Bước 3/3: TRELLIS sinh mô hình 3D Mesh...';
+                }
+                progressBar.style.width = progress + '%';
+                percentLabel.innerText = progress + '%';
+            }, 600);
+
+            const formData = new FormData();
+            formData.append('person_image', personFile);
+            formData.append('cloth_image', clothFile);
+            formData.append('category', document.getElementById('categorySelect').value);
+
+            const quality = document.getElementById('qualitySelect').value;
+            if (quality === 'turbo') {
+                formData.append('sparse_steps', '8');
+                formData.append('slat_steps', '8');
+            } else {
+                formData.append('sparse_steps', '12');
+                formData.append('slat_steps', '12');
+            }
+
+            const startTime = performance.now();
+
+            try {
+                const response = await fetch('/api/v1/tryon-3d', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                clearInterval(timer);
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Lỗi server');
+                }
+
+                progressBar.style.width = '100%';
+                percentLabel.innerText = '100%';
+                statusLabel.innerText = '✅ Hoàn tất! Đang nạp mô hình 3D...';
+
+                const blob = await response.blob();
+                const modelUrl = URL.createObjectURL(blob);
+
+                const viewer = document.getElementById('modelViewer');
+                viewer.src = modelUrl;
+                viewer.style.display = 'block';
+                document.getElementById('viewerPlaceholder').style.display = 'none';
+                document.getElementById('actionBar').style.display = 'flex';
+
+                const downloadBtn = document.getElementById('downloadGlbBtn');
+                downloadBtn.href = modelUrl;
+
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+                const badge = document.getElementById('renderTimeBadge');
+                badge.innerText = `⏱️ ${elapsed}s`;
+                badge.style.display = 'inline-block';
+
+            } catch (error) {
+                clearInterval(timer);
+                alert('Lỗi khi sinh 3D: ' + error.message);
+                statusLabel.innerText = '❌ Có lỗi xảy ra!';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🚀 Thử Đồ & Sinh Mô Hình 3D</span>';
+            }
+        }
+
+        function toggleRotate() {
+            const viewer = document.getElementById('modelViewer');
+            viewer.autoRotate = !viewer.autoRotate;
+        }
+
+        function resetCamera() {
+            const viewer = document.getElementById('modelViewer');
+            viewer.cameraOrbit = '0deg 75deg 105%';
+        }
+    </script>
+</body>
+</html>
+"""
+
+@app.get("/", response_class=HTMLResponse)
+def root_ui():
+    """Trả về giao diện web studio 3D ảo trực tiếp trên trình duyệt"""
+    return HTMLResponse(content=HTML_UI)
 
 
 @app.get("/health")

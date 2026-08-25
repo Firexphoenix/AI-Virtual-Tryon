@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-FASHION-VTON + TRELLIS.2 PIPELINE v1.0
-Thay thế hoàn toàn GS-VTON (COLMAP + LoRA + 3DGS Training)
+AI VIRTUAL TRY-ON 3D — PIPELINE v2.0
+Tổng hợp và tối ưu từ 3 nguồn mã nguồn mở:
 
-Pipeline mới:
-  Bước 1: Fashn-VTON  → Ảnh 2D người mẫu mặc Áo Dài (10-15 giây)
-  Bước 2: Remove BG   → Tách nền trong suốt RGBA (5 giây)
-  Bước 3: TRELLIS.2   → 3D .glb + .ply + Video 360° (20-40 giây)
+  1. GS-VTON (Yukang Cao et al., NTU)
+     https://github.com/yukangcao/GS-VTON
+     → Kiến trúc pipeline gốc, IDM-VTON, LoRA, GaussianEditor
 
-Tổng thời gian: ~1-2 phút (thay vì 2-4 giờ của GS-VTON)
+  2. Microsoft TRELLIS
+     https://github.com/microsoft/TRELLIS
+     → 3D Generative Model (SLAT Diffusion) — Sinh mô hình 3D từ 1 ảnh
+
+  3. Fashn AI — fashn-vton-1.5
+     https://github.com/fashn-AI/fashn-vton-1.5
+     → 2D Virtual Try-On nhanh, thay thế IDM-VTON
+
+Pipeline mới (v2.0):
+  Bước 1: Fashn-VTON  → Ảnh 2D người mẫu mặc trang phục   (~10-15 giây)
+  Bước 2: Rembg       → Tách nền trong suốt RGBA            (~5 giây)
+  Bước 3: TRELLIS     → 3D .glb + .ply + Video 360°         (~20-40 giây)
+
+Tổng thời gian: ~1-2 phút (thay vì 2-4 giờ của GS-VTON cũ)
 Môi trường:     Kaggle / Colab GPU (T4 16GB trở lên, Linux, CUDA 12.x)
+Tối ưu hóa:     FP16 Tensor Cores, Dual GPU T4 x2, xFormers attention
 ================================================================================
 """
 

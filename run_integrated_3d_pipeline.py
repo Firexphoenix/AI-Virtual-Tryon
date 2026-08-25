@@ -472,30 +472,78 @@ def run_step3_trellis_3d(
 
     # Xuất file .glb (Textured Mesh)
     print(f"📦 Đang xuất Textured Mesh → {glb_path}")
+    glb_size_mb = 0
     try:
         if postprocessing_utils is not None and hasattr(postprocessing_utils, "to_glb"):
             glb = postprocessing_utils.to_glb(
                 outputs["gaussian"][0],
                 outputs["mesh"][0],
-                simplify=0.95,      # Giữ 95% polygon detail, giảm kích thước file
+                simplify=0.95,
                 texture_size=1024,
             )
             glb.export(glb_path)
         else:
-            outputs["mesh"][0].export(glb_path)
+            # Fallback: dùng trimesh để xuất từ vertices/faces tensor
+            import trimesh
+            mesh_result = outputs["mesh"][0]
+            verts = mesh_result.vertices.cpu().numpy()
+            faces = mesh_result.faces.cpu().numpy()
+            # Lấy vertex colors nếu có
+            vertex_colors = None
+            if hasattr(mesh_result, "vertex_attrs") and mesh_result.vertex_attrs is not None:
+                try:
+                    vc = mesh_result.vertex_attrs.cpu().numpy()
+                    if vc.shape[-1] >= 3:
+                        vc_rgb = vc[..., :3]
+                        if vc_rgb.max() <= 1.0:
+                            vc_rgb = (vc_rgb * 255).astype(np.uint8)
+                        vertex_colors = vc_rgb
+                except Exception:
+                    pass
+            tri_mesh = trimesh.Trimesh(
+                vertices=verts,
+                faces=faces,
+                vertex_colors=vertex_colors,
+                process=False,
+            )
+            tri_mesh.export(glb_path)
         glb_size_mb = os.path.getsize(glb_path) / 1024 ** 2
         print(f"   ✅ .glb xuất thành công ({glb_size_mb:.1f} MB)")
     except Exception as glb_err:
-        print(f"⚠️ Thử xuất OBJ/GLB trực tiếp ({glb_err})...")
-        outputs["mesh"][0].export(glb_path)
-        glb_size_mb = os.path.getsize(glb_path) / 1024 ** 2
-        print(f"   ✅ .glb xuất thành công ({glb_size_mb:.1f} MB)")
+        print(f"⚠️ Xuất .glb lỗi ({glb_err}) — thử xuất .obj...")
+        try:
+            import trimesh
+            mesh_result = outputs["mesh"][0]
+            tri_mesh = trimesh.Trimesh(
+                vertices=mesh_result.vertices.cpu().numpy(),
+                faces=mesh_result.faces.cpu().numpy(),
+                process=False,
+            )
+            obj_path = glb_path.replace(".glb", ".obj")
+            tri_mesh.export(obj_path)
+            tri_mesh.export(glb_path)
+            glb_size_mb = os.path.getsize(glb_path) / 1024 ** 2
+            print(f"   ✅ .glb xuất thành công ({glb_size_mb:.1f} MB)")
+        except Exception as e2:
+            print(f"❌ Xuất mesh thất bại: {e2}")
 
     # Xuất file .ply (3D Gaussian Splatting)
     print(f"✨ Đang xuất 3D Gaussian Splatting → {ply_path}")
-    outputs["gaussian"][0].save_ply(ply_path)
-    ply_size_mb = os.path.getsize(ply_path) / 1024 ** 2
-    print(f"   ✅ .ply xuất thành công ({ply_size_mb:.1f} MB)")
+    ply_size_mb = 0
+    try:
+        gs = outputs["gaussian"][0]
+        if hasattr(gs, "save_ply"):
+            gs.save_ply(ply_path)
+        else:
+            # Fallback: xuất point cloud qua trimesh
+            import trimesh
+            points = gs._xyz.cpu().numpy() if hasattr(gs, "_xyz") else gs.xyz.cpu().numpy()
+            pc = trimesh.PointCloud(points)
+            pc.export(ply_path)
+        ply_size_mb = os.path.getsize(ply_path) / 1024 ** 2
+        print(f"   ✅ .ply xuất thành công ({ply_size_mb:.1f} MB)")
+    except Exception as ply_err:
+        print(f"⚠️ Xuất .ply bỏ qua ({ply_err})")
 
     # Render video xoay 360° (nếu có render_utils)
     if has_render_utils and render_utils is not None:
@@ -531,11 +579,20 @@ def run_step3_trellis_3d(
     gc.collect()
 
     # Tóm tắt kết quả
+    video_size_mb = 0
+    if video_path and os.path.exists(video_path):
+        video_size_mb = os.path.getsize(video_path) / 1024 ** 2
+
     print("\n" + "=" * 70)
     print("🎉 BƯỚC 3 HOÀN TẤT! Đầu ra 3D:")
-    print(f"   📦 Mesh (.glb) : {glb_path}  [{glb_size_mb:.1f} MB]")
-    print(f"   ✨ 3DGS (.ply)  : {ply_path}  [{ply_size_mb:.1f} MB]")
-    print(f"   🎬 Video (.mp4) : {video_path}  [{video_size_mb:.1f} MB]")
+    if os.path.exists(glb_path):
+        print(f"   📦 Mesh (.glb) : {glb_path}  [{glb_size_mb:.1f} MB]")
+    if os.path.exists(ply_path):
+        print(f"   ✨ 3DGS (.ply)  : {ply_path}  [{ply_size_mb:.1f} MB]")
+    if video_path and os.path.exists(video_path):
+        print(f"   🎬 Video (.mp4) : {video_path}  [{video_size_mb:.1f} MB]")
+    else:
+        print(f"   🎬 Video (.mp4) : (bỏ qua — cần nvdiffrast)")
     print("=" * 70)
 
     result = {"glb": glb_path, "ply": ply_path, "video": video_path}
@@ -545,9 +602,10 @@ def run_step3_trellis_3d(
         drive_out = os.path.join(drive_dir, "AODAI_3D_TRELLIS_RESULT")
         os.makedirs(drive_out, exist_ok=True)
         for label, fpath in result.items():
-            dst = os.path.join(drive_out, os.path.basename(fpath))
-            shutil.copy(fpath, dst)
-            print(f"💾 Đã sao chép {label} → {dst}")
+            if fpath and os.path.exists(fpath):
+                dst = os.path.join(drive_out, os.path.basename(fpath))
+                shutil.copy(fpath, dst)
+                print(f"💾 Đã sao chép {label} → {dst}")
 
     return result
 

@@ -220,12 +220,3 @@ Dự án này sử dụng mã nguồn mở từ nhiều tác giả. Vui lòng t�
 - **Fashn-VTON**: Xem tại [fashn-AI/fashn-vton-1.5](https://github.com/fashn-AI/fashn-vton-1.5)
 
 Phần tích hợp và tối ưu hóa pipeline trong repo này: **MIT License**.
-
----
-
-## 📞 Liên hệ
-
-Nếu bạn gặp vấn đề khi chạy pipeline, hãy mở [Issue](https://github.com/Firexphoenix/AI-Virtual-Tryon/issues) và cung cấp:
-1. Log lỗi đầy đủ
-2. GPU bạn đang dùng (T4 / P100 / A100)
-3. Môi trường (Kaggle / Colab / Local)
